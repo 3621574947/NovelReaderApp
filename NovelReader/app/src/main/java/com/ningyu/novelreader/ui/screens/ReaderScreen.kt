@@ -1,107 +1,91 @@
 package com.ningyu.novelreader.ui.screens
 
-import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
+import androidx.compose.ui.unit.sp
+import com.ningyu.novelreader.data.BookRepository
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-
-val Context.dataStore by preferencesDataStore("reading_progress")
+import androidx.core.content.edit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
     title: String,
     content: String,
+    repository: BookRepository,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val paragraphs = remember(content) { content.chunked(2000) }
-    var currentPage by rememberSaveable { mutableIntStateOf(0) }
+
+    val localPref = LocalContext.current.getSharedPreferences("progress", 0)
+    val currentPage = rememberSaveable {
+        mutableIntStateOf(localPref.getInt(title, 0).coerceIn(0, paragraphs.lastIndex))
+    }
 
     LaunchedEffect(title) {
-        val key = intPreferencesKey("progress_$title")
-        val savedPage = context.dataStore.data.map { it[key] ?: 0 }.first()
-        currentPage = savedPage.coerceIn(0, paragraphs.lastIndex)
+        val savedPage = repository.getProgress(title)
+        if (savedPage != currentPage.intValue) {
+            currentPage.intValue = savedPage.coerceIn(0, paragraphs.lastIndex)
+        }
     }
 
     fun saveProgress(page: Int) {
-        val key = intPreferencesKey("progress_$title")
-        scope.launch(Dispatchers.IO) {
-            context.dataStore.edit { prefs -> prefs[key] = page }
-        }
+        localPref.edit { putInt(title, page) }
+        scope.launch(Dispatchers.IO) { repository.saveProgress(title, page) }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("$title - 第 ${currentPage + 1} / ${paragraphs.size} 页") },
+                title = { Text("$title - 第 ${currentPage.intValue + 1} / ${paragraphs.size} 页") },
                 navigationIcon = {
                     IconButton(onClick = {
-                        saveProgress(currentPage)
+                        saveProgress(currentPage.intValue)
                         onBack()
-                    }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
-                    }
+                    }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回") }
                 }
             )
         },
         bottomBar = {
-            ReaderControls(
-                currentPage = currentPage,
-                totalPages = paragraphs.size,
-                onPrev = {
-                    if (currentPage > 0) {
-                        currentPage--
-                        saveProgress(currentPage)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Button(onClick = {
+                    if (currentPage.intValue > 0) {
+                        currentPage.intValue--
+                        saveProgress(currentPage.intValue)
                     }
-                },
-                onNext = {
-                    if (currentPage < paragraphs.lastIndex) {
-                        currentPage++
-                        saveProgress(currentPage)
+                }) { Text("上一页") }
+
+                Button(onClick = {
+                    if (currentPage.intValue < paragraphs.lastIndex) {
+                        currentPage.intValue++
+                        saveProgress(currentPage.intValue)
                     }
-                }
-            )
+                }) { Text("下一页") }
+            }
         }
     ) { innerPadding ->
         Text(
-            text = paragraphs[currentPage],
+            text = paragraphs[currentPage.intValue],
             modifier = Modifier
                 .padding(innerPadding)
                 .padding(16.dp)
-                .fillMaxSize()
+                .fillMaxSize(),
+            fontSize = 18.sp,
+            lineHeight = 26.sp
         )
-    }
-}
-
-@Composable
-private fun ReaderControls(
-    currentPage: Int,
-    totalPages: Int,
-    onPrev: () -> Unit,
-    onNext: () -> Unit
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Button(onClick = onPrev, enabled = currentPage > 0) { Text("上一页") }
-        Button(onClick = onNext, enabled = currentPage < totalPages - 1) { Text("下一页") }
     }
 }

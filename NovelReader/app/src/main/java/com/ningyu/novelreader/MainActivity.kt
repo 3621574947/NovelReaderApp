@@ -1,27 +1,28 @@
 package com.ningyu.novelreader
 
+import android.content.ContentResolver
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
-import androidx.core.content.edit
-import androidx.core.net.toUri
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.ningyu.novelreader.data.Book
+import com.ningyu.novelreader.data.BookRepository
 import com.ningyu.novelreader.ui.screens.BookListScreen
 import com.ningyu.novelreader.ui.screens.ReaderScreen
 import com.ningyu.novelreader.ui.theme.NovelReaderTheme
+import kotlinx.coroutines.launch
+import androidx.core.net.toUri
 
 class MainActivity : ComponentActivity() {
-
-    private val PREFS_NAME = "books_prefs"
-    private val KEY_BOOKS = "books"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,29 +30,57 @@ class MainActivity : ComponentActivity() {
         setContent {
             NovelReaderTheme {
                 val navController = rememberNavController()
-                var books by remember { mutableStateOf(loadBooks()) }
+                val repository = remember { BookRepository() }
+                var books by remember { mutableStateOf<List<Book>>(emptyList()) }
+                val scope = rememberCoroutineScope()
+
+                LaunchedEffect(Unit) {
+                    repository.listenToBooks { updated -> books = updated }
+                }
 
                 val filePicker = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument(),
-                    onResult = { uri: Uri? -> uri?.let { handleFilePicked(it, books) { newBooks -> books = newBooks } } }
+                    onResult = { uri: Uri? ->
+                        uri?.let {
+                            contentResolver.takePersistableUriPermission(
+                                it, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                            scope.launch {
+                                val name = getFileNameFromUri(contentResolver, it) ?: "未命名小说"
+                                repository.addBook(name, it.toString())
+                            }
+                        }
+                    }
                 )
 
-                NavHost(
-                    navController = navController,
-                    startDestination = "booklist"
-                ) {
+                NavHost(navController, startDestination = "booklist") {
                     composable("booklist") {
                         BookListScreen(
-                            books = books.keys.toList(),
-                            onAddClick = { filePicker.launch(arrayOf("text/plain")) },
+                            books = books.map { it.title },
+                            onImportClick = { filePicker.launch(arrayOf("text/*", "text/plain")) },
                             onBookClick = { title ->
-                                books[title]?.let { uri ->
-                                    val text = readTextFromUri(uri)
+                                val book = books.find { it.title == title }
+                                if (book != null) {
+                                    val text = readTextFromUri(book.localPath.toUri())
                                     ReadingHolder.apply {
                                         this.title = title
                                         this.text = text
                                     }
                                     navController.navigate("reader/$title")
+                                }
+                            },
+                            onDeleteBook = { title ->
+                                scope.launch { repository.deleteBook(title) }
+                            },
+                            onRenameBook = { oldTitle, newTitle ->
+                                scope.launch { repository.renameBook(oldTitle, newTitle) }
+                            },
+                            onBatchRename = { selected, prefix ->
+                                scope.launch {
+                                    selected.forEachIndexed { index, oldTitle ->
+                                        val newTitle = "$prefix${index + 1}"
+                                        repository.renameBook(oldTitle, newTitle)
+                                    }
                                 }
                             }
                         )
@@ -62,6 +91,7 @@ class MainActivity : ComponentActivity() {
                         ReaderScreen(
                             title = title,
                             content = ReadingHolder.text,
+                            repository = repository,
                             onBack = { navController.popBackStack() }
                         )
                     }
@@ -70,54 +100,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun handleFilePicked(uri: Uri, currentBooks: Map<String, Uri>, updateBooks: (Map<String, Uri>) -> Unit) {
-        try {
-            contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            )
-        } catch (e: SecurityException) {
-            e.printStackTrace()
-        }
-
-        val fileName = getFileNameFromUri(uri)
-        val newBooks = currentBooks + (fileName to uri)
-        saveBooks(newBooks)
-        updateBooks(newBooks)
-    }
-
-    private fun saveBooks(books: Map<String, Uri>) {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        val data = books.entries.joinToString("\n") { (title, uri) -> "$title|$uri" }
-        prefs.edit { putString(KEY_BOOKS, data) }
-    }
-
-    private fun loadBooks(): Map<String, Uri> {
-        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-        val data = prefs.getString(KEY_BOOKS, "").orEmpty()
-        return data.lineSequence()
-            .filter { it.isNotBlank() }
-            .mapNotNull {
-                val parts = it.split("|", limit = 2)
-                if (parts.size == 2) parts[0] to parts[1].toUri() else null
-            }
-            .toMap()
-    }
-
-    private fun getFileNameFromUri(uri: Uri): String {
-        val cursor = contentResolver.query(uri, null, null, null, null)
-        val nameIndex = cursor?.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME) ?: -1
-        cursor?.moveToFirst()
-        val name = if (nameIndex >= 0) cursor?.getString(nameIndex) else "未知文件"
-        cursor?.close()
-        return name ?: "未知文件"
-    }
-
     private fun readTextFromUri(uri: Uri): String = try {
         contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
     } catch (e: Exception) {
         e.printStackTrace()
-        "无法显示文件信息"
+        "无法读取文件内容"
+    }
+
+    private fun getFileNameFromUri(resolver: ContentResolver, uri: Uri): String? {
+        return try {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0) {
+                        var name = cursor.getString(idx)
+                        name = name.substringBeforeLast('.', name)
+                        return name
+                    }
+                }
+                null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 }
 
