@@ -16,24 +16,18 @@ import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(
-    // onFinish 是一个回调函数，用于告诉 MainActivity 应该导航到哪个路由（login 或 booklist）
     onFinish: (String) -> Unit
 ) {
     val auth = FirebaseAuth.getInstance()
 
-    // LaunchedEffect 用于控制启动页的流程
     LaunchedEffect(Unit) {
-        // 1. 等待 1.5 秒（你可以根据需要调整时间）
         delay(1500)
 
-        // 2. 根据用户登录状态确定最终路由
         val startRoute = if (auth.currentUser != null) "booklist" else "login"
 
-        // 3. 执行导航回调
         onFinish(startRoute)
     }
 
-    // 启动页的 UI 界面
     Column(
         modifier = Modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally,

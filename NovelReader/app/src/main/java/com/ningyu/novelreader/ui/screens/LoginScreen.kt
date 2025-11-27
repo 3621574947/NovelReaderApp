@@ -37,7 +37,6 @@ fun LoginScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // Email 输入框
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -51,7 +50,6 @@ fun LoginScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // 密码输入框
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -76,7 +74,6 @@ fun LoginScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // 登录按钮
         Button(
             onClick = {
                 loading = true

@@ -25,7 +25,7 @@ import com.ningyu.novelreader.ui.screens.LoginScreen
 import com.ningyu.novelreader.ui.screens.RegisterScreen
 import com.ningyu.novelreader.ui.screens.SettingsScreen
 import com.google.firebase.auth.FirebaseAuth
-import androidx.compose.material3.SnackbarHostState // 确保引入
+import androidx.compose.material3.SnackbarHostState
 import com.ningyu.novelreader.ui.screens.SplashScreen
 
 class MainActivity : ComponentActivity() {
@@ -40,7 +40,6 @@ class MainActivity : ComponentActivity() {
                 val scope = rememberCoroutineScope()
                 val auth = FirebaseAuth.getInstance()
 
-                // 监听书籍列表
                 var books by remember { mutableStateOf(emptyList<Book>()) }
                 LaunchedEffect(repository) {
                     repository.listenToBooks { updatedBooks ->
@@ -48,15 +47,12 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // 检查用户登录状态，决定起始页
                 val startDestination = "splash"
 
-                // 文件选择器
                 val filePicker = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument(),
                     onResult = { uri: Uri? ->
                         if (uri != null) {
-                            // 确保 App 具有持续访问此 URI 的权限
                             contentResolver.takePersistableUriPermission(
                                 uri,
                                 Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -77,7 +73,6 @@ class MainActivity : ComponentActivity() {
                         SplashScreen(
                             onFinish = { finalRoute ->
                                 navController.navigate(finalRoute) {
-                                    // 导航完成后，将 Splash Screen 从返回栈中移除
                                     popUpTo("splash") { inclusive = true }
                                 }
                             }
@@ -87,7 +82,6 @@ class MainActivity : ComponentActivity() {
                     composable("login") {
                         LoginScreen(
                             onLoginSuccess = { navController.navigate("booklist") {
-                                // 登录成功后清除栈，避免返回
                                 popUpTo("login") { inclusive = true }
                             } },
                             onGoRegister = { navController.navigate("register") }
@@ -119,7 +113,6 @@ class MainActivity : ComponentActivity() {
                             books = books.map { it.title },
                             onImportClick = { filePicker.launch(arrayOf("text/*", "text/plain")) },
                             onBookClick = { title ->
-                                // ⚠️ 关键修改：只传递书名
                                 navController.navigate("reader/$title")
                             },
                             onDeleteBook = { title ->
@@ -146,7 +139,6 @@ class MainActivity : ComponentActivity() {
                         val title = backStackEntry.arguments?.getString("title").orEmpty()
                         ReaderScreen(
                             title = title,
-                            // ⚠️ content 参数已移除，ReaderScreen 会自行加载
                             repository = repository,
                             onBack = { navController.popBackStack() }
                         )
@@ -156,7 +148,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ⚠️ readTextFromUri 函数已移除，并移动到 ReaderScreen.kt
 
     private fun getFileNameFromUri(resolver: ContentResolver, uri: Uri): String? {
         return try {
@@ -165,7 +156,6 @@ class MainActivity : ComponentActivity() {
                     val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (idx >= 0) {
                         var name = cursor.getString(idx)
-                        // 移除文件扩展名
                         name = name.substringBeforeLast('.', name)
                         return name
                     }
@@ -178,4 +168,3 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-// ⚠️ ReadingHolder 对象已移除

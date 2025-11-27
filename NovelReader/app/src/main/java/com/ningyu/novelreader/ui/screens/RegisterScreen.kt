@@ -40,7 +40,6 @@ fun RegisterScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // 邮箱输入框
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
@@ -50,7 +49,6 @@ fun RegisterScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // 密码输入框
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
@@ -71,7 +69,6 @@ fun RegisterScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // 确认密码
         OutlinedTextField(
             value = confirmPassword,
             onValueChange = { confirmPassword = it },
@@ -92,7 +89,6 @@ fun RegisterScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // 错误信息
         if (errorMessage != null) {
             Text(
                 text = errorMessage!!,
@@ -102,7 +98,6 @@ fun RegisterScreen(
 
         Spacer(Modifier.height(20.dp))
 
-        // 注册按钮
         Button(
             onClick = {
                 errorMessage = null
