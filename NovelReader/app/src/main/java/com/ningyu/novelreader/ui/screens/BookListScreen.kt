@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -24,8 +25,10 @@ fun BookListScreen(
     onBookClick: (String) -> Unit,
     onDeleteBook: (String) -> Unit,
     onRenameBook: (String, String) -> Unit,
-    onBatchRename: (List<String>, String) -> Unit
-) {
+    onBatchRename: (List<String>, String) -> Unit,
+    onSettingsClick: () -> Unit
+
+    ) {
     var manageMode by remember { mutableStateOf(false) }
     val selectedBooks = remember { mutableStateListOf<String>() }
     var showRenameDialog by remember { mutableStateOf(false) }
@@ -47,6 +50,9 @@ fun BookListScreen(
                             selectedBooks.clear()
                         }) { Text("退出") }
                     } else {
+                        IconButton(onClick = { onSettingsClick() }) {
+                            Icon(Icons.Default.Settings, contentDescription = "用户设置")
+                        }
                         IconButton(onClick = { manageMode = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "管理书籍")
                         }

@@ -21,6 +21,12 @@ import com.ningyu.novelreader.ui.screens.ReaderScreen
 import com.ningyu.novelreader.ui.theme.NovelReaderTheme
 import kotlinx.coroutines.launch
 import androidx.core.net.toUri
+import com.ningyu.novelreader.ui.screens.LoginScreen
+import com.ningyu.novelreader.ui.screens.RegisterScreen
+import com.ningyu.novelreader.ui.screens.SettingsScreen
+import com.google.firebase.auth.FirebaseAuth
+import androidx.compose.material3.SnackbarHostState // 确保引入
+import com.ningyu.novelreader.ui.screens.SplashScreen
 
 class MainActivity : ComponentActivity() {
 
@@ -31,43 +37,90 @@ class MainActivity : ComponentActivity() {
             NovelReaderTheme {
                 val navController = rememberNavController()
                 val repository = remember { BookRepository() }
-                var books by remember { mutableStateOf<List<Book>>(emptyList()) }
                 val scope = rememberCoroutineScope()
+                val auth = FirebaseAuth.getInstance()
 
-                LaunchedEffect(Unit) {
-                    repository.listenToBooks { updated -> books = updated }
+                // 监听书籍列表
+                var books by remember { mutableStateOf(emptyList<Book>()) }
+                LaunchedEffect(repository) {
+                    repository.listenToBooks { updatedBooks ->
+                        books = updatedBooks
+                    }
                 }
 
+                // 检查用户登录状态，决定起始页
+                val startDestination = "splash"
+
+                // 文件选择器
                 val filePicker = rememberLauncherForActivityResult(
                     contract = ActivityResultContracts.OpenDocument(),
                     onResult = { uri: Uri? ->
-                        uri?.let {
+                        if (uri != null) {
+                            // 确保 App 具有持续访问此 URI 的权限
                             contentResolver.takePersistableUriPermission(
-                                it, Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION
                             )
-                            scope.launch {
-                                val name = getFileNameFromUri(contentResolver, it) ?: "未命名小说"
-                                repository.addBook(name, it.toString())
+
+                            val fileName = getFileNameFromUri(contentResolver, uri)
+                            if (fileName != null) {
+                                scope.launch {
+                                    repository.addBook(fileName, uri.toString())
+                                }
                             }
                         }
                     }
                 )
 
-                NavHost(navController, startDestination = "booklist") {
+                NavHost(navController, startDestination = startDestination) {
+                    composable("splash") {
+                        SplashScreen(
+                            onFinish = { finalRoute ->
+                                navController.navigate(finalRoute) {
+                                    // 导航完成后，将 Splash Screen 从返回栈中移除
+                                    popUpTo("splash") { inclusive = true }
+                                }
+                            }
+                        )
+                    }
+
+                    composable("login") {
+                        LoginScreen(
+                            onLoginSuccess = { navController.navigate("booklist") {
+                                // 登录成功后清除栈，避免返回
+                                popUpTo("login") { inclusive = true }
+                            } },
+                            onGoRegister = { navController.navigate("register") }
+                        )
+                    }
+
+                    composable("register") {
+                        RegisterScreen(
+                            onRegisterSuccess = { navController.navigate("booklist") {
+                                popUpTo("register") { inclusive = true }
+                            } },
+                            onGoLogin = { navController.popBackStack() }
+                        )
+                    }
+
+                    composable("settings") {
+                        SettingsScreen(
+                            onLogout = { navController.navigate("login") {
+                                popUpTo("booklist") { inclusive = true }
+                            }},
+                            onAccountDeleted = { navController.navigate("login") {
+                                popUpTo("booklist") { inclusive = true }
+                            }}
+                        )
+                    }
+
                     composable("booklist") {
                         BookListScreen(
                             books = books.map { it.title },
                             onImportClick = { filePicker.launch(arrayOf("text/*", "text/plain")) },
                             onBookClick = { title ->
-                                val book = books.find { it.title == title }
-                                if (book != null) {
-                                    val text = readTextFromUri(book.localPath.toUri())
-                                    ReadingHolder.apply {
-                                        this.title = title
-                                        this.text = text
-                                    }
-                                    navController.navigate("reader/$title")
-                                }
+                                // ⚠️ 关键修改：只传递书名
+                                navController.navigate("reader/$title")
                             },
                             onDeleteBook = { title ->
                                 scope.launch { repository.deleteBook(title) }
@@ -82,6 +135,9 @@ class MainActivity : ComponentActivity() {
                                         repository.renameBook(oldTitle, newTitle)
                                     }
                                 }
+                            },
+                            onSettingsClick = {
+                                navController.navigate("settings")
                             }
                         )
                     }
@@ -90,7 +146,7 @@ class MainActivity : ComponentActivity() {
                         val title = backStackEntry.arguments?.getString("title").orEmpty()
                         ReaderScreen(
                             title = title,
-                            content = ReadingHolder.text,
+                            // ⚠️ content 参数已移除，ReaderScreen 会自行加载
                             repository = repository,
                             onBack = { navController.popBackStack() }
                         )
@@ -100,12 +156,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun readTextFromUri(uri: Uri): String = try {
-        contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
-    } catch (e: Exception) {
-        e.printStackTrace()
-        "无法读取文件内容"
-    }
+    // ⚠️ readTextFromUri 函数已移除，并移动到 ReaderScreen.kt
 
     private fun getFileNameFromUri(resolver: ContentResolver, uri: Uri): String? {
         return try {
@@ -114,6 +165,7 @@ class MainActivity : ComponentActivity() {
                     val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                     if (idx >= 0) {
                         var name = cursor.getString(idx)
+                        // 移除文件扩展名
                         name = name.substringBeforeLast('.', name)
                         return name
                     }
@@ -126,8 +178,4 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
-object ReadingHolder {
-    var title: String = ""
-    var text: String = ""
-}
+// ⚠️ ReadingHolder 对象已移除

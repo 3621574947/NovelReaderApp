@@ -66,6 +66,12 @@ class BookRepository {
         return doc.getLong("progress")?.toInt() ?: 0
     }
 
+    suspend fun getBookByTitle(titleRaw: String): Book? {
+        val title = sanitizeTitle(titleRaw)
+        val doc = booksRef.document(title).get().await()
+        return doc.toObject(Book::class.java)
+    }
+
     fun listenToBooks(onChange: (List<Book>) -> Unit) {
         booksRef.addSnapshotListener { snapshot, error ->
             if (error != null) return@addSnapshotListener
