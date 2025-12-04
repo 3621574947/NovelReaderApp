@@ -11,6 +11,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
+import com.ningyu.novelreader.ui.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,7 +59,7 @@ fun RegisterScreen(
                 if (passwordVisible) VisualTransformation.None
                 else PasswordVisualTransformation(),
             trailingIcon = {
-                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                AppIconButton(onClick = { passwordVisible = !passwordVisible }) {
                     Icon(
                         if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = null
@@ -78,7 +79,7 @@ fun RegisterScreen(
                 if (confirmVisible) VisualTransformation.None
                 else PasswordVisualTransformation(),
             trailingIcon = {
-                IconButton(onClick = { confirmVisible = !confirmVisible }) {
+                AppIconButton(onClick = { confirmVisible = !confirmVisible }) {
                     Icon(
                         if (confirmVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                         contentDescription = null
@@ -98,12 +99,20 @@ fun RegisterScreen(
 
         Spacer(Modifier.height(20.dp))
 
-        Button(
+        AppButton(
             onClick = {
                 errorMessage = null
                 if (password != confirmPassword) {
                     errorMessage = "两次密码不一致"
-                    return@Button
+                    return@AppButton
+                }
+                if (email.trim().isBlank() || password.isBlank() || confirmPassword.isBlank()) {
+                    errorMessage = "请填写邮箱和密码"
+                    return@AppButton
+                }
+                if (password.length < 6) {
+                    errorMessage = "密码至少6位字符"
+                    return@AppButton
                 }
 
                 loading = true
@@ -127,7 +136,7 @@ fun RegisterScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        TextButton(onClick = onGoLogin) {
+        AppTextButton(onClick = onGoLogin) {
             Text("已有账号？返回登录")
         }
     }

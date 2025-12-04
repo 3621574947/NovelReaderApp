@@ -11,6 +11,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
+import com.ningyu.novelreader.ui.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +60,7 @@ fun LoginScreen(
                 if (passwordVisible) VisualTransformation.None
                 else PasswordVisualTransformation(),
             trailingIcon = {
-                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                AppIconButton(onClick = { passwordVisible = !passwordVisible }) {
                     Icon(
                         if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
                         contentDescription = null
@@ -74,8 +75,12 @@ fun LoginScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        Button(
+        AppButton(
             onClick = {
+                if (email.trim().isBlank() || password.isBlank()) {
+                    errorMessage = "请填写邮箱和密码"
+                    return@AppButton
+                }
                 loading = true
                 errorMessage = null
 
@@ -98,7 +103,7 @@ fun LoginScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        TextButton(onClick = onGoRegister) {
+        AppTextButton(onClick = onGoRegister) {
             Text("没有账号？点击注册")
         }
     }

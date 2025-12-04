@@ -1,6 +1,7 @@
 package com.ningyu.novelreader.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -23,6 +24,11 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.core.net.toUri
 import com.google.firebase.auth.FirebaseAuth
+import com.ningyu.novelreader.data.BookRepository
+import com.ningyu.novelreader.ui.components.AppButton
+import com.ningyu.novelreader.ui.components.AppDestructiveButton
+import com.ningyu.novelreader.ui.components.AppDestructiveOutlinedButton
+import com.ningyu.novelreader.ui.components.AppTextButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
@@ -64,6 +70,7 @@ private fun loadBitmapFromUri(context: Context, uri: Uri): android.graphics.Bitm
 @Composable
 fun SettingsScreen(
     onLogout: () -> Unit,
+    repository: BookRepository,
     onAccountDeleted: () -> Unit
 ) {
     val auth = FirebaseAuth.getInstance()
@@ -109,7 +116,7 @@ fun SettingsScreen(
             snackBarMessage = null
         }
     }
-
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
     val imagePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
     ) { uri ->
@@ -182,7 +189,7 @@ fun SettingsScreen(
 
             HorizontalDivider(Modifier, DividerDefaults.Thickness, DividerDefaults.color)
 
-            Button(
+            AppButton(
                 onClick = {
                     val email = user?.email
                     if (email != null) {
@@ -197,10 +204,13 @@ fun SettingsScreen(
                 Text("修改密码（邮件重置）")
             }
 
-            Button(
+            AppButton(
                 onClick = {
                     val prefs = context.getSharedPreferences("progress", 0)
                     prefs.edit { clear() }
+                    scope.launch {
+                        repository.clearAllProgress()
+                    }
                     snackBarMessage = "已清除本地阅读进度"
                 },
                 modifier = Modifier.fillMaxWidth()
@@ -208,27 +218,67 @@ fun SettingsScreen(
                 Text("清除本地阅读进度")
             }
 
-            OutlinedButton(
-                onClick = { showDeleteDialog = true },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error
-                )
+
+
+            AppDestructiveButton(
+                onClick = { showDeleteAllDialog = true },
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Text("删除账户")
+                Text("一键删除本地书籍")
             }
 
-            Button(
+            if (showDeleteAllDialog) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteAllDialog = false },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            scope.launch(Dispatchers.IO) {
+                                val books = repository.getAllBooks()
+                                val prefs = context.getSharedPreferences("progress", 0)
+                                prefs.edit { clear() }
+                                books.forEach { book ->
+                                    val uri = book.localPath.toUri()
+                                    try {
+                                        context.contentResolver.releasePersistableUriPermission(
+                                            uri,
+                                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                        )
+                                    } catch (e: Exception) {
+                                    }
+                                    repository.deleteBook(book.title)
+                                }
+                                snackBarMessage = "已删除所有书籍"
+                            }
+                            showDeleteAllDialog = false
+                        }) {
+                            Text("确认")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteAllDialog = false }) {
+                            Text("取消")
+                        }
+                    },
+                    title = { Text("确定删除所有书籍？") },
+                    text = { Text("此操作将删除所有书籍记录和释放本地文件权限，无法恢复。") }
+                )
+            }
+
+            AppDestructiveButton(
                 onClick = {
                     auth.signOut()
                     onLogout()
                 },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.error
-                )
+                modifier = Modifier.fillMaxWidth()
             ) {
                 Text("退出登录")
+            }
+
+            AppDestructiveOutlinedButton(
+                onClick = { showDeleteDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("删除账户")
             }
         }
 

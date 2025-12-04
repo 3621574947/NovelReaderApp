@@ -86,4 +86,16 @@ class BookRepository {
             .replace(Regex("[\\r\\n]+"), " ")
             .replace(Regex("[/\\\\#?\\[\\]]"), "_")
     }
+
+    suspend fun getAllBooks(): List<Book> {
+        return booksRef.get().await().documents.mapNotNull { it.toObject(Book::class.java) }
+    }
+
+    suspend fun clearAllProgress() {
+        val books = getAllBooks()
+        for (book in books) {
+            saveProgress(book.title, 0)
+        }
+    }
+
 }

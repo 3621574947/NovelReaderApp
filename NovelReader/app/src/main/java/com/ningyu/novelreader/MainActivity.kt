@@ -20,12 +20,10 @@ import com.ningyu.novelreader.ui.screens.BookListScreen
 import com.ningyu.novelreader.ui.screens.ReaderScreen
 import com.ningyu.novelreader.ui.theme.NovelReaderTheme
 import kotlinx.coroutines.launch
-import androidx.core.net.toUri
 import com.ningyu.novelreader.ui.screens.LoginScreen
 import com.ningyu.novelreader.ui.screens.RegisterScreen
 import com.ningyu.novelreader.ui.screens.SettingsScreen
 import com.google.firebase.auth.FirebaseAuth
-import androidx.compose.material3.SnackbarHostState
 import com.ningyu.novelreader.ui.screens.SplashScreen
 
 class MainActivity : ComponentActivity() {
@@ -104,13 +102,14 @@ class MainActivity : ComponentActivity() {
                             }},
                             onAccountDeleted = { navController.navigate("login") {
                                 popUpTo("booklist") { inclusive = true }
-                            }}
+                            }},
+                            repository = repository
                         )
                     }
 
                     composable("booklist") {
                         BookListScreen(
-                            books = books.map { it.title },
+                            books = books,
                             onImportClick = { filePicker.launch(arrayOf("text/*", "text/plain")) },
                             onBookClick = { title ->
                                 navController.navigate("reader/$title")
@@ -120,14 +119,6 @@ class MainActivity : ComponentActivity() {
                             },
                             onRenameBook = { oldTitle, newTitle ->
                                 scope.launch { repository.renameBook(oldTitle, newTitle) }
-                            },
-                            onBatchRename = { selected, prefix ->
-                                scope.launch {
-                                    selected.forEachIndexed { index, oldTitle ->
-                                        val newTitle = "$prefix${index + 1}"
-                                        repository.renameBook(oldTitle, newTitle)
-                                    }
-                                }
                             },
                             onSettingsClick = {
                                 navController.navigate("settings")

@@ -4,39 +4,40 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.ningyu.novelreader.data.Book
+import com.ningyu.novelreader.ui.components.*
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookListScreen(
-    books: List<String>,
+    books: List<Book>,
     onImportClick: () -> Unit,
     onBookClick: (String) -> Unit,
     onDeleteBook: (String) -> Unit,
     onRenameBook: (String, String) -> Unit,
-    onBatchRename: (List<String>, String) -> Unit,
     onSettingsClick: () -> Unit
-
-    ) {
+) {
     var manageMode by remember { mutableStateOf(false) }
     val selectedBooks = remember { mutableStateListOf<String>() }
     var showRenameDialog by remember { mutableStateOf(false) }
-    var renamePrefix by remember { mutableStateOf("") }
+    var newTitle by remember { mutableStateOf("") }
 
     val colorPalette = listOf(
-        Color(0xFFE3F2FD),
-
+        Color(0xFFE3F2FD)
     )
 
     Scaffold(
@@ -45,15 +46,15 @@ fun BookListScreen(
                 title = { Text(if (manageMode) "管理模式（${selectedBooks.size} 已选）" else "我的书库") },
                 actions = {
                     if (manageMode) {
-                        TextButton(onClick = {
+                        AppTextButton(onClick = {
                             manageMode = false
                             selectedBooks.clear()
                         }) { Text("退出") }
                     } else {
-                        IconButton(onClick = { onSettingsClick() }) {
+                        AppIconButton(onClick = { onSettingsClick() }) {
                             Icon(Icons.Default.Settings, contentDescription = "用户设置")
                         }
-                        IconButton(onClick = { manageMode = true }) {
+                        AppIconButton(onClick = { manageMode = true }) {
                             Icon(Icons.Default.MoreVert, contentDescription = "管理书籍")
                         }
                     }
@@ -73,17 +74,18 @@ fun BookListScreen(
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        OutlinedButton(onClick = onImportClick) { Text("导入小说") }
-                        OutlinedButton(
-                            onClick = { showRenameDialog = true },
-                            enabled = selectedBooks.isNotEmpty()
+                        AppOutlinedButton(onClick = onImportClick) { Text("导入小说") }
+                        AppOutlinedButton(
+                            onClick = {
+                                showRenameDialog = true
+                            },
+                            enabled = selectedBooks.size == 1
                         ) { Text("重命名") }
-                        OutlinedButton(
+                        AppDestructiveOutlinedButton(
                             onClick = {
                                 selectedBooks.forEach { onDeleteBook(it) }
                                 selectedBooks.clear()
                             },
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Red),
                             enabled = selectedBooks.isNotEmpty()
                         ) { Text("删除") }
                     }
@@ -98,21 +100,22 @@ fun BookListScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            itemsIndexed(books) { index, title ->
+            itemsIndexed(books) { index, book ->
                 val bg = colorPalette[index % colorPalette.size]
                 BookRowCard(
-                    title = title,
-                    selected = selectedBooks.contains(title),
+                    title = book.title,
+                    progress = book.progress,
+                    selected = selectedBooks.contains(book.title),
                     manageMode = manageMode,
                     backgroundColor = bg,
                     onClick = {
                         if (manageMode) {
-                            if (selectedBooks.contains(title))
-                                selectedBooks.remove(title)
+                            if (selectedBooks.contains(book.title))
+                                selectedBooks.remove(book.title)
                             else
-                                selectedBooks.add(title)
+                                selectedBooks.add(book.title)
                         } else {
-                            onBookClick(title)
+                            onBookClick(book.title)
                         }
                     }
                 )
@@ -124,23 +127,24 @@ fun BookListScreen(
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
             confirmButton = {
-                TextButton(onClick = {
-                    if (renamePrefix.isNotBlank()) {
-                        onBatchRename(selectedBooks.toList(), renamePrefix)
-                        renamePrefix = ""
+                AppTextButton(onClick = {
+                    if (newTitle.isNotBlank() && selectedBooks.size == 1) {
+                        onRenameBook(selectedBooks.first(), newTitle)
+                        selectedBooks.clear()
+                        manageMode = false
                         showRenameDialog = false
                     }
                 }) { Text("确定") }
             },
             dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) { Text("取消") }
+                AppTextButton(onClick = { showRenameDialog = false }) { Text("取消") }
             },
-            title = { Text("批量重命名") },
+            title = { Text("重命名书籍") },
             text = {
                 OutlinedTextField(
-                    value = renamePrefix,
-                    onValueChange = { renamePrefix = it },
-                    label = { Text("输入前缀") }
+                    value = newTitle,
+                    onValueChange = { newTitle = it },
+                    label = { Text("新标题") }
                 )
             }
         )
@@ -150,6 +154,7 @@ fun BookListScreen(
 @Composable
 fun BookRowCard(
     title: String,
+    progress: Int,
     selected: Boolean,
     manageMode: Boolean,
     backgroundColor: Color,
@@ -175,11 +180,25 @@ fun BookRowCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            Icon(
+                Icons.Default.Book,
+                contentDescription = "Book icon",
+                modifier = Modifier.size(40.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
                     fontSize = 18.sp,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = "阅读进度: $progress 页",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
