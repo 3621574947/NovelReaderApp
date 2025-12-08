@@ -149,7 +149,7 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
 
-            Text("账号信息", style = MaterialTheme.typography.titleLarge)
+            Text("", style = MaterialTheme.typography.titleLarge)
 
             Row(
                 verticalAlignment = Alignment.CenterVertically
