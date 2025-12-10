@@ -8,6 +8,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +36,12 @@ fun BookListScreen(
     val selectedBooks = remember { mutableStateListOf<String>() }
     var showRenameDialog by remember { mutableStateOf(false) }
     var newTitle by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf("") }
+
+    val filteredBooks = remember(books, searchQuery) {
+        if (searchQuery.isBlank()) books
+        else books.filter { it.title.contains(searchQuery, ignoreCase = true) }
+    }
 
     val colorPalette = listOf(
         Color(0xFFE3F2FD)
@@ -93,32 +100,49 @@ fun BookListScreen(
             }
         }
     ) { innerPadding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            itemsIndexed(books) { index, book ->
-                val bg = colorPalette[index % colorPalette.size]
-                BookRowCard(
-                    title = book.title,
-                    progress = book.progress,
-                    selected = selectedBooks.contains(book.title),
-                    manageMode = manageMode,
-                    backgroundColor = bg,
-                    onClick = {
-                        if (manageMode) {
-                            if (selectedBooks.contains(book.title))
-                                selectedBooks.remove(book.title)
-                            else
-                                selectedBooks.add(book.title)
-                        } else {
-                            onBookClick(book.title)
-                        }
-                    }
+            if (!manageMode) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = { Text("搜索书籍") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    singleLine = true
                 )
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(filteredBooks) { index, book ->
+                    val bg = colorPalette[index % colorPalette.size]
+                    BookRowCard(
+                        title = book.title,
+                        progress = book.progress,
+                        selected = selectedBooks.contains(book.title),
+                        manageMode = manageMode,
+                        backgroundColor = bg,
+                        onClick = {
+                            if (manageMode) {
+                                if (selectedBooks.contains(book.title))
+                                    selectedBooks.remove(book.title)
+                                else
+                                    selectedBooks.add(book.title)
+                            } else {
+                                onBookClick(book.title)
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -196,7 +220,7 @@ fun BookRowCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "阅读进度: $progress 页",
+                    text = "阅读进度: ${progress+1} 页",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
