@@ -13,11 +13,14 @@ import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.ningyu.novelreader.ui.components.*
 
+/**
+ * Registration screen – allows new users to create an account using email & password
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegisterScreen(
     onRegisterSuccess: () -> Unit,
-    onGoLogin: () -> Unit
+    onGoToLogin: () -> Unit
 ) {
     val auth = FirebaseAuth.getInstance()
 
@@ -28,7 +31,7 @@ fun RegisterScreen(
     var passwordVisible by remember { mutableStateOf(false) }
     var confirmVisible by remember { mutableStateOf(false) }
 
-    var loading by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -37,15 +40,20 @@ fun RegisterScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text("创建新账号", style = MaterialTheme.typography.headlineMedium)
+        Text(
+            text = "Create Account",
+            style = MaterialTheme.typography.headlineMedium
+        )
 
         Spacer(Modifier.height(24.dp))
 
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text("邮箱") },
-            modifier = Modifier.fillMaxWidth()
+            label = { Text("Email") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading
         )
 
         Spacer(Modifier.height(16.dp))
@@ -53,19 +61,18 @@ fun RegisterScreen(
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("密码") },
+            label = { Text("Password") },
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation =
-                if (passwordVisible) VisualTransformation.None
-                else PasswordVisualTransformation(),
+            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
                 AppIconButton(onClick = { passwordVisible = !passwordVisible }) {
                     Icon(
-                        if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = null
+                        imageVector = if (passwordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = "Toggle password visibility"
                     )
                 }
-            }
+            },
+            enabled = !isLoading
         )
 
         Spacer(Modifier.height(16.dp))
@@ -73,71 +80,79 @@ fun RegisterScreen(
         OutlinedTextField(
             value = confirmPassword,
             onValueChange = { confirmPassword = it },
-            label = { Text("确认密码") },
+            label = { Text("Confirm Password") },
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation =
-                if (confirmVisible) VisualTransformation.None
-                else PasswordVisualTransformation(),
+            visualTransformation = if (confirmVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
                 AppIconButton(onClick = { confirmVisible = !confirmVisible }) {
                     Icon(
-                        if (confirmVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                        contentDescription = null
+                        imageVector = if (confirmVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = "Toggle confirmation visibility"
                     )
                 }
-            }
+            },
+            enabled = !isLoading
         )
 
         Spacer(Modifier.height(16.dp))
 
-        if (errorMessage != null) {
+        errorMessage?.let {
             Text(
-                text = errorMessage!!,
-                color = MaterialTheme.colorScheme.error
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium
             )
+            Spacer(Modifier.height(8.dp))
         }
-
-        Spacer(Modifier.height(20.dp))
 
         AppButton(
             onClick = {
                 errorMessage = null
-                if (password != confirmPassword) {
-                    errorMessage = "两次密码不一致"
-                    return@AppButton
-                }
-                if (email.trim().isBlank() || password.isBlank() || confirmPassword.isBlank()) {
-                    errorMessage = "请填写邮箱和密码"
-                    return@AppButton
-                }
-                if (password.length < 6) {
-                    errorMessage = "密码至少6位字符"
-                    return@AppButton
+
+                when {
+                    email.trim().isBlank() || password.isBlank() -> {
+                        errorMessage = "Please enter email and password"
+                        return@AppButton
+                    }
+                    password.length < 6 -> {
+                        errorMessage = "Password must be at least 6 characters"
+                        return@AppButton
+                    }
+                    password != confirmPassword -> {
+                        errorMessage = "Passwords do not match"
+                        return@AppButton
+                    }
                 }
 
-                loading = true
-
+                isLoading = true
                 auth.createUserWithEmailAndPassword(email.trim(), password)
                     .addOnCompleteListener { task ->
-                        loading = false
+                        isLoading = false
                         if (task.isSuccessful) {
                             onRegisterSuccess()
                         } else {
-                            errorMessage = task.exception?.localizedMessage ?: "注册失败"
+                            errorMessage = task.exception?.localizedMessage ?: "Registration failed"
                         }
                     }
             },
-            enabled = !loading,
+            enabled = !isLoading,
             modifier = Modifier.fillMaxWidth()
         ) {
-            if (loading) CircularProgressIndicator()
-            else Text("注册")
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text("Register")
         }
 
         Spacer(Modifier.height(16.dp))
 
-        AppTextButton(onClick = onGoLogin) {
-            Text("已有账号？返回登录")
+        AppTextButton(onClick = onGoToLogin) {
+            Text("Already have an account? Log in")
         }
     }
 }

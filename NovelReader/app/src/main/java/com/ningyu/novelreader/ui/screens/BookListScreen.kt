@@ -22,6 +22,10 @@ import androidx.compose.ui.unit.sp
 import com.ningyu.novelreader.data.Book
 import com.ningyu.novelreader.ui.components.*
 
+/**
+ * Main library screen – displays all imported books.
+ * Supports search, selection mode, bulk delete, rename, and import.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BookListScreen(
@@ -29,72 +33,87 @@ fun BookListScreen(
     onImportClick: () -> Unit,
     onBookClick: (String) -> Unit,
     onDeleteBook: (String) -> Unit,
-    onRenameBook: (String, String) -> Unit,
+    onRenameBook: (oldTitle: String, newTitle: String) -> Unit,
     onSettingsClick: () -> Unit
 ) {
-    var manageMode by remember { mutableStateOf(false) }
-    val selectedBooks = remember { mutableStateListOf<String>() }
+    var isManageMode by remember { mutableStateOf(false) }
+    val selectedTitles = remember { mutableStateListOf<String>() }
     var showRenameDialog by remember { mutableStateOf(false) }
-    var newTitle by remember { mutableStateOf("") }
+    var newTitleInput by remember { mutableStateOf("") }
     var searchQuery by remember { mutableStateOf("") }
 
+    // Filter books based on search query
     val filteredBooks = remember(books, searchQuery) {
         if (searchQuery.isBlank()) books
         else books.filter { it.title.contains(searchQuery, ignoreCase = true) }
     }
 
-    val colorPalette = listOf(
-        Color(0xFFE3F2FD)
+    // Background colors for book cards (alternating light tint)
+    val cardColors = listOf(
+        Color(0xFFE3F2FD),
+        Color(0xFFF1F8E9),
+        Color(0xFFFFF3E0),
+        Color(0xFFF3E5F5)
     )
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (manageMode) "管理模式（${selectedBooks.size} 已选）" else "我的书库") },
+                title = {
+                    Text(
+                        if (isManageMode) "Manage (${selectedTitles.size} selected)"
+                        else "My Library"
+                    )
+                },
                 actions = {
-                    if (manageMode) {
+                    if (isManageMode) {
                         AppTextButton(onClick = {
-                            manageMode = false
-                            selectedBooks.clear()
-                        }) { Text("退出") }
+                            isManageMode = false
+                            selectedTitles.clear()
+                        }) { Text("Cancel") }
                     } else {
-                        AppIconButton(onClick = { onSettingsClick() }) {
-                            Icon(Icons.Default.Settings, contentDescription = "用户设置")
+                        AppIconButton(onClick = onSettingsClick) {
+                            Icon(Icons.Default.Settings, contentDescription = "Settings")
                         }
-                        AppIconButton(onClick = { manageMode = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "管理书籍")
+                        AppIconButton(onClick = { isManageMode = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Manage books")
                         }
                     }
                 }
             )
         },
         bottomBar = {
-            if (manageMode) {
+            if (isManageMode) {
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
-                    tonalElevation = 4.dp,
+                    tonalElevation = 8.dp,
                     shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                 ) {
                     Row(
-                        Modifier
+                        modifier = Modifier
                             .fillMaxWidth()
                             .padding(16.dp),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        AppOutlinedButton(onClick = onImportClick) { Text("导入小说") }
+                        AppOutlinedButton(onClick = onImportClick) {
+                            Text("Import Book")
+                        }
                         AppOutlinedButton(
-                            onClick = {
-                                showRenameDialog = true
-                            },
-                            enabled = selectedBooks.size == 1
-                        ) { Text("重命名") }
+                            onClick = { showRenameDialog = true },
+                            enabled = selectedTitles.size == 1
+                        ) {
+                            Text("Rename")
+                        }
                         AppDestructiveOutlinedButton(
                             onClick = {
-                                selectedBooks.forEach { onDeleteBook(it) }
-                                selectedBooks.clear()
+                                selectedTitles.forEach { onDeleteBook(it) }
+                                selectedTitles.clear()
+                                isManageMode = false
                             },
-                            enabled = selectedBooks.isNotEmpty()
-                        ) { Text("删除") }
+                            enabled = selectedTitles.isNotEmpty()
+                        ) {
+                            Text("Delete")
+                        }
                     }
                 }
             }
@@ -105,38 +124,40 @@ fun BookListScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (!manageMode) {
+            // Search bar – only visible when not in manage mode
+            if (!isManageMode) {
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    label = { Text("搜索书籍") },
+                    label = { Text("Search books") },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
                     singleLine = true
                 )
             }
+
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 itemsIndexed(filteredBooks) { index, book ->
-                    val bg = colorPalette[index % colorPalette.size]
-                    BookRowCard(
-                        title = book.title,
-                        progress = book.progress,
-                        selected = selectedBooks.contains(book.title),
-                        manageMode = manageMode,
-                        backgroundColor = bg,
+                    val backgroundColor = if (selectedTitles.contains(book.title))
+                        MaterialTheme.colorScheme.secondaryContainer
+                    else cardColors[index % cardColors.size]
+
+                    BookCard(
+                        book = book,
+                        backgroundColor = backgroundColor,
+                        isSelected = selectedTitles.contains(book.title),
+                        isManageMode = isManageMode,
                         onClick = {
-                            if (manageMode) {
-                                if (selectedBooks.contains(book.title))
-                                    selectedBooks.remove(book.title)
+                            if (isManageMode) {
+                                if (selectedTitles.contains(book.title))
+                                    selectedTitles.remove(book.title)
                                 else
-                                    selectedBooks.add(book.title)
+                                    selectedTitles.add(book.title)
                             } else {
                                 onBookClick(book.title)
                             }
@@ -147,90 +168,85 @@ fun BookListScreen(
         }
     }
 
-    if (showRenameDialog) {
+    // Rename dialog
+    if (showRenameDialog && selectedTitles.size == 1) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            confirmButton = {
-                AppTextButton(onClick = {
-                    if (newTitle.isNotBlank() && selectedBooks.size == 1) {
-                        onRenameBook(selectedBooks.first(), newTitle)
-                        selectedBooks.clear()
-                        manageMode = false
-                        showRenameDialog = false
-                    }
-                }) { Text("确定") }
-            },
-            dismissButton = {
-                AppTextButton(onClick = { showRenameDialog = false }) { Text("取消") }
-            },
-            title = { Text("重命名书籍") },
+            title = { Text("Rename Book") },
             text = {
                 OutlinedTextField(
-                    value = newTitle,
-                    onValueChange = { newTitle = it },
-                    label = { Text("新标题") }
+                    value = newTitleInput,
+                    onValueChange = { newTitleInput = it },
+                    label = { Text("New title") },
+                    singleLine = true
                 )
+            },
+            confirmButton = {
+                AppTextButton(onClick = {
+                    if (newTitleInput.isNotBlank()) {
+                        onRenameBook(selectedTitles.first(), newTitleInput.trim())
+                        selectedTitles.clear()
+                        isManageMode = false
+                    }
+                    showRenameDialog = false
+                }) { Text("Confirm") }
+            },
+            dismissButton = {
+                AppTextButton(onClick = { showRenameDialog = false }) { Text("Cancel") }
             }
         )
     }
 }
 
+/**
+ * Individual book card used in the library list
+ */
 @Composable
-fun BookRowCard(
-    title: String,
-    progress: Int,
-    selected: Boolean,
-    manageMode: Boolean,
+private fun BookCard(
+    book: Book,
     backgroundColor: Color,
+    isSelected: Boolean,
+    isManageMode: Boolean,
     onClick: () -> Unit
 ) {
-    val displayColor = when {
-        selected -> MaterialTheme.colorScheme.secondaryContainer
-        else -> backgroundColor
-    }
-
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(containerColor = displayColor),
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
     ) {
         Row(
             modifier = Modifier
                 .padding(16.dp)
                 .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Icon(
-                Icons.Default.Book,
-                contentDescription = "Book icon",
+                imageVector = Icons.Default.Book,
+                contentDescription = null,
                 modifier = Modifier.size(40.dp),
                 tint = MaterialTheme.colorScheme.primary
             )
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = title,
+                    text = book.title,
                     fontSize = 18.sp,
-                    color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "阅读进度: ${progress+1} 页",
+                    text = "Progress: Page ${book.progress + 1}",
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
-            if (manageMode) {
+            if (isManageMode) {
                 Checkbox(
-                    checked = selected,
-                    onCheckedChange = { onClick() },
-                    colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
+                    checked = isSelected,
+                    onCheckedChange = { onClick() }
                 )
             }
         }

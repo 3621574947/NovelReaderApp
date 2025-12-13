@@ -7,24 +7,27 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.google.firebase.auth.FirebaseAuth
 import com.ningyu.novelreader.ui.components.*
 
+/**
+ * Login screen – allows existing users to sign in with email and password
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
     onLoginSuccess: () -> Unit,
-    onGoRegister: () -> Unit
+    onGoToRegister: () -> Unit
 ) {
     val auth = FirebaseAuth.getInstance()
 
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var passwordVisible by remember { mutableStateOf(false) }
-    var loading by remember { mutableStateOf(false) }
+    var isPasswordVisible by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     Column(
@@ -33,78 +36,97 @@ fun LoginScreen(
             .padding(24.dp),
         verticalArrangement = Arrangement.Center
     ) {
+        Text(
+            text = "Welcome Back",
+            style = MaterialTheme.typography.headlineMedium
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Log in to continue reading",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-        Text("登录账号", style = MaterialTheme.typography.headlineMedium)
-
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(32.dp))
 
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text("邮箱") },
-            modifier = Modifier.fillMaxWidth()
+            label = { Text("Email") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true,
+            enabled = !isLoading
         )
-
-        if (errorMessage?.contains("email", true) == true) {
-            Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
-        }
 
         Spacer(Modifier.height(16.dp))
 
         OutlinedTextField(
             value = password,
             onValueChange = { password = it },
-            label = { Text("密码") },
+            label = { Text("Password") },
             modifier = Modifier.fillMaxWidth(),
-            visualTransformation =
-                if (passwordVisible) VisualTransformation.None
-                else PasswordVisualTransformation(),
+            visualTransformation = if (isPasswordVisible) VisualTransformation.None else PasswordVisualTransformation(),
             trailingIcon = {
-                AppIconButton(onClick = { passwordVisible = !passwordVisible }) {
+                AppIconButton(onClick = { isPasswordVisible = !isPasswordVisible }) {
                     Icon(
-                        if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                        contentDescription = null
+                        imageVector = if (isPasswordVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = "Toggle password visibility"
                     )
                 }
-            }
+            },
+            enabled = !isLoading
         )
-
-        if (errorMessage?.contains("password", true) == true) {
-            Text(text = errorMessage!!, color = MaterialTheme.colorScheme.error)
-        }
 
         Spacer(Modifier.height(24.dp))
 
+        // Show error message if login failed
+        errorMessage?.let {
+            Text(
+                text = it,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(16.dp))
+        }
+
         AppButton(
             onClick = {
-                if (email.trim().isBlank() || password.isBlank()) {
-                    errorMessage = "请填写邮箱和密码"
-                    return@AppButton
-                }
-                loading = true
                 errorMessage = null
 
+                if (email.trim().isBlank() || password.isBlank()) {
+                    errorMessage = "Please enter both email and password"
+                    return@AppButton
+                }
+
+                isLoading = true
                 auth.signInWithEmailAndPassword(email.trim(), password)
                     .addOnCompleteListener { task ->
-                        loading = false
+                        isLoading = false
                         if (task.isSuccessful) {
                             onLoginSuccess()
                         } else {
-                            errorMessage = task.exception?.localizedMessage ?: "登录失败"
+                            errorMessage = task.exception?.localizedMessage ?: "Login failed"
                         }
                     }
             },
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !loading
+            enabled = !isLoading,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            if (loading) CircularProgressIndicator()
-            else Text("登录")
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text("Log In")
         }
 
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(20.dp))
 
-        AppTextButton(onClick = onGoRegister) {
-            Text("没有账号？点击注册")
+        AppTextButton(onClick = onGoToRegister) {
+            Text("Don't have an account? Register")
         }
     }
 }

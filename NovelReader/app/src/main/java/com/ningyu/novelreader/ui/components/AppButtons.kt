@@ -1,12 +1,15 @@
 package com.ningyu.novelreader.ui.components
 
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.shape.RoundedCornerShape
 
+/**
+ * Primary filled button used throughout the app
+ */
 @Composable
 fun AppButton(
     onClick: () -> Unit,
@@ -25,6 +28,9 @@ fun AppButton(
     )
 }
 
+/**
+ * Destructive filled button (red background) – used for dangerous actions
+ */
 @Composable
 fun AppDestructiveButton(
     onClick: () -> Unit,
@@ -43,6 +49,9 @@ fun AppDestructiveButton(
     )
 }
 
+/**
+ * Standard outlined button
+ */
 @Composable
 fun AppOutlinedButton(
     onClick: () -> Unit,
@@ -55,11 +64,13 @@ fun AppOutlinedButton(
         modifier = modifier,
         enabled = enabled,
         shape = RoundedCornerShape(20.dp),
-        colors = ButtonDefaults.outlinedButtonColors(),
         content = content
     )
 }
 
+/**
+ * Outlined button with red text – used for dangerous actions that should be less prominent
+ */
 @Composable
 fun AppDestructiveOutlinedButton(
     onClick: () -> Unit,
@@ -72,11 +83,16 @@ fun AppDestructiveOutlinedButton(
         modifier = modifier,
         enabled = enabled,
         shape = RoundedCornerShape(20.dp),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = MaterialTheme.colorScheme.error
+        ),
         content = content
     )
 }
 
+/**
+ * Simple text button – optionally destructive (red text)
+ */
 @Composable
 fun AppTextButton(
     onClick: () -> Unit,
@@ -89,11 +105,16 @@ fun AppTextButton(
         onClick = onClick,
         modifier = modifier,
         enabled = enabled,
-        colors = if (isDestructive) ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error) else ButtonDefaults.textButtonColors(),
+        colors = if (isDestructive) {
+            ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+        } else ButtonDefaults.textButtonColors(),
         content = content
     )
 }
 
+/**
+ * Icon-only button (usually placed in TopAppBar actions)
+ */
 @Composable
 fun AppIconButton(
     onClick: () -> Unit,
@@ -103,7 +124,6 @@ fun AppIconButton(
     IconButton(
         onClick = onClick,
         modifier = modifier,
-        colors = IconButtonDefaults.iconButtonColors(),
         content = content
     )
 }

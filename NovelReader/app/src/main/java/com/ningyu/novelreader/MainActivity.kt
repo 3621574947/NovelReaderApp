@@ -1,6 +1,7 @@
 package com.ningyu.novelreader
 
 import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -16,101 +17,113 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ningyu.novelreader.data.Book
 import com.ningyu.novelreader.data.BookRepository
-import com.ningyu.novelreader.ui.screens.BookListScreen
-import com.ningyu.novelreader.ui.screens.ReaderScreen
+import com.ningyu.novelreader.ui.screens.*
 import com.ningyu.novelreader.ui.theme.NovelReaderTheme
 import kotlinx.coroutines.launch
-import com.ningyu.novelreader.ui.screens.LoginScreen
-import com.ningyu.novelreader.ui.screens.RegisterScreen
-import com.ningyu.novelreader.ui.screens.SettingsScreen
-import com.google.firebase.auth.FirebaseAuth
-import com.ningyu.novelreader.ui.screens.SplashScreen
 
+/**
+ * Main entry point of the application.
+ * Sets up navigation, Firebase listeners, and file import functionality.
+ */
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
         setContent {
             NovelReaderTheme {
                 val navController = rememberNavController()
                 val repository = remember { BookRepository() }
                 val scope = rememberCoroutineScope()
-                val auth = FirebaseAuth.getInstance()
 
+                // Live list of books from Firestore – updated in real time
                 var books by remember { mutableStateOf(emptyList<Book>()) }
+
+                // Listen to Firestore changes and keep local state in sync
                 LaunchedEffect(repository) {
                     repository.listenToBooks { updatedBooks ->
                         books = updatedBooks
                     }
                 }
 
-                val startDestination = "splash"
+                // File picker for importing .txt novels using Storage Access Framework (SAF)
+                val fileImportLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.OpenDocument()
+                ) { uri: Uri? ->
+                    uri?.let { selectedUri ->
+                        // Request persistent permission so we can read the file later
+                        contentResolver.takePersistableUriPermission(
+                            selectedUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
 
-                val filePicker = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.OpenDocument(),
-                    onResult = { uri: Uri? ->
-                        if (uri != null) {
-                            contentResolver.takePersistableUriPermission(
-                                uri,
-                                Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            )
-
-                            val fileName = getFileNameFromUri(contentResolver, uri)
-                            if (fileName != null) {
-                                scope.launch {
-                                    repository.addBook(fileName, uri.toString())
-                                }
+                        val fileName = getFileNameFromUri(contentResolver, selectedUri)
+                        if (fileName != null) {
+                            scope.launch {
+                                repository.addBook(fileName, selectedUri.toString())
                             }
                         }
                     }
-                )
+                }
 
-                NavHost(navController, startDestination = startDestination) {
+                // Navigation graph
+                NavHost(
+                    navController = navController,
+                    startDestination = "splash"
+                ) {
                     composable("splash") {
-                        SplashScreen(
-                            onFinish = { finalRoute ->
-                                navController.navigate(finalRoute) {
-                                    popUpTo("splash") { inclusive = true }
-                                }
+                        SplashScreen { destination ->
+                            navController.navigate(destination) {
+                                popUpTo("splash") { inclusive = true }
                             }
-                        )
+                        }
                     }
 
                     composable("login") {
                         LoginScreen(
-                            onLoginSuccess = { navController.navigate("booklist") {
-                                popUpTo("login") { inclusive = true }
-                            } },
-                            onGoRegister = { navController.navigate("register") }
+                            onLoginSuccess = {
+                                navController.navigate("booklist") {
+                                    popUpTo("login") { inclusive = true }
+                                }
+                            },
+                            onGoToRegister = { navController.navigate("register") }
                         )
                     }
 
                     composable("register") {
                         RegisterScreen(
-                            onRegisterSuccess = { navController.navigate("booklist") {
-                                popUpTo("register") { inclusive = true }
-                            } },
-                            onGoLogin = { navController.popBackStack() }
+                            onRegisterSuccess = {
+                                navController.navigate("booklist") {
+                                    popUpTo("register") { inclusive = true }
+                                }
+                            },
+                            onGoToLogin = { navController.popBackStack() }
                         )
                     }
 
                     composable("settings") {
                         SettingsScreen(
-                            onLogout = { navController.navigate("login") {
-                                popUpTo("booklist") { inclusive = true }
-                            }},
-                            onAccountDeleted = { navController.navigate("login") {
-                                popUpTo("booklist") { inclusive = true }
-                            }},
-                            repository = repository
+                            onLogout = {
+                                navController.navigate("login") {
+                                    popUpTo("booklist") { inclusive = true }
+                                }
+                            },
+                            repository = repository,
+                            onAccountDeleted = {
+                                navController.navigate("login") {
+                                    popUpTo(0) { inclusive = true }
+                                }
+                            }
                         )
                     }
 
                     composable("booklist") {
                         BookListScreen(
                             books = books,
-                            onImportClick = { filePicker.launch(arrayOf("text/*", "text/plain")) },
+                            onImportClick = {
+                                fileImportLauncher.launch(arrayOf("text/*"))
+                            },
                             onBookClick = { title ->
                                 navController.navigate("reader/$title")
                             },
@@ -118,16 +131,28 @@ class MainActivity : ComponentActivity() {
                                 scope.launch { repository.deleteBook(title) }
                             },
                             onRenameBook = { oldTitle, newTitle ->
-                                scope.launch { repository.renameBook(oldTitle, newTitle) }
+                                scope.launch {
+                                    // 1. 获取重命名后的最终标题（Firestore 中已原子更新）
+                                    val finalNewTitle = repository.renameBook(oldTitle, newTitle)
+
+                                    // 2. 迁移本地 SharedPreferences 中的阅读进度
+                                    // 这可以防止打开新书时进度为0，从而导致自动保存覆盖了云端的正确进度
+                                    val prefs = getSharedPreferences("progress", Context.MODE_PRIVATE)
+                                    val oldProgress = prefs.getInt(oldTitle, 0)
+                                    if (oldProgress > 0) {
+                                        prefs.edit()
+                                            .putInt(finalNewTitle, oldProgress)
+                                            .remove(oldTitle)
+                                            .apply()
+                                    }
+                                }
                             },
-                            onSettingsClick = {
-                                navController.navigate("settings")
-                            }
+                            onSettingsClick = { navController.navigate("settings") }
                         )
                     }
 
                     composable("reader/{title}") { backStackEntry ->
-                        val title = backStackEntry.arguments?.getString("title").orEmpty()
+                        val title = backStackEntry.arguments?.getString("title") ?: ""
                         ReaderScreen(
                             title = title,
                             repository = repository,
@@ -139,15 +164,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-
+    /**
+     * Extracts display name from a content URI.
+     * Used to show a friendly title when importing a book.
+     */
     private fun getFileNameFromUri(resolver: ContentResolver, uri: Uri): String? {
         return try {
             resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
-                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (idx >= 0) {
-                        var name = cursor.getString(idx)
-                        name = name.substringBeforeLast('.', name)
+                    val columnIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (columnIndex != -1) {
+                        var name = cursor.getString(columnIndex)
+                        // Remove file extension for cleaner display
+                        name = name.substringBeforeLast(".")
                         return name
                     }
                 }
