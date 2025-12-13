@@ -33,7 +33,6 @@ Perfect for reading your personal `.txt` novel collections with seamless cloud p
 
 ```bash
 git clone https://github.com/3621574947/NovelReaderApp.git
-cd novel-reader
 ```
 Open with Android Studio Iguana (2023.2.1+)
 Set up Firebase:
