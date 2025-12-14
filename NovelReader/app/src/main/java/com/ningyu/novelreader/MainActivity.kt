@@ -15,6 +15,8 @@ import androidx.compose.runtime.*
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.ListenerRegistration
 import com.ningyu.novelreader.data.Book
 import com.ningyu.novelreader.data.BookRepository
 import com.ningyu.novelreader.ui.screens.*
@@ -40,10 +42,28 @@ class MainActivity : ComponentActivity() {
                 // Live list of books from Firestore – updated in real time
                 var books by remember { mutableStateOf(emptyList<Book>()) }
 
-                // Listen to Firestore changes and keep local state in sync
-                LaunchedEffect(repository) {
-                    repository.listenToBooks { updatedBooks ->
-                        books = updatedBooks
+                DisposableEffect(Unit) {
+                    val auth = FirebaseAuth.getInstance()
+                    var registration: ListenerRegistration? = null
+
+                    val authListener = FirebaseAuth.AuthStateListener { firebaseAuth ->
+                        registration?.remove()
+
+                        val user = firebaseAuth.currentUser
+                        if (user != null) {
+                            registration = repository.listenToBooks { updatedBooks ->
+                                books = updatedBooks
+                            }
+                        } else {
+                            books = emptyList()
+                        }
+                    }
+
+                    auth.addAuthStateListener(authListener)
+
+                    onDispose {
+                        auth.removeAuthStateListener(authListener)
+                        registration?.remove()
                     }
                 }
 
@@ -132,11 +152,8 @@ class MainActivity : ComponentActivity() {
                             },
                             onRenameBook = { oldTitle, newTitle ->
                                 scope.launch {
-                                    // 1. 获取重命名后的最终标题（Firestore 中已原子更新）
                                     val finalNewTitle = repository.renameBook(oldTitle, newTitle)
 
-                                    // 2. 迁移本地 SharedPreferences 中的阅读进度
-                                    // 这可以防止打开新书时进度为0，从而导致自动保存覆盖了云端的正确进度
                                     val prefs = getSharedPreferences("progress", Context.MODE_PRIVATE)
                                     val oldProgress = prefs.getInt(oldTitle, 0)
                                     if (oldProgress > 0) {
