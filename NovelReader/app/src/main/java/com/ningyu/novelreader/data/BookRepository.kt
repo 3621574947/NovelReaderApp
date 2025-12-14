@@ -2,6 +2,7 @@ package com.ningyu.novelreader.data
 
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ListenerRegistration
 import com.google.firebase.firestore.SetOptions
 import kotlinx.coroutines.tasks.await
 
@@ -37,6 +38,8 @@ class BookRepository {
      * appends a timestamp to avoid document ID collision.
      */
     suspend fun addBook(rawTitle: String, localPath: String) {
+        if (auth.currentUser == null) return
+
         val title = sanitizeTitle(rawTitle)
         val docRef = getBooksRef().document(title)
 
@@ -53,6 +56,7 @@ class BookRepository {
 
     /** Deletes a book document from Firestore */
     suspend fun deleteBook(rawTitle: String) {
+        if (auth.currentUser == null) return
         val title = sanitizeTitle(rawTitle)
         getBooksRef().document(title).delete().await()
     }
@@ -63,10 +67,11 @@ class BookRepository {
      * Returns the final new title so the UI/Local storage can update references.
      */
     suspend fun renameBook(oldTitleRaw: String, newTitleRaw: String): String {
+        if (auth.currentUser == null) return oldTitleRaw
+
         val oldTitle = sanitizeTitle(oldTitleRaw)
         val candidateTitle = sanitizeTitle(newTitleRaw)
 
-        // 如果名字没变，直接返回
         if (oldTitle == candidateTitle) return oldTitle
 
         val oldBookRef = getBooksRef().document(oldTitle)
@@ -79,7 +84,6 @@ class BookRepository {
 
         val newBook = oldBook.copy(title = finalNewTitle, timestamp = System.currentTimeMillis())
 
-        // 使用 Batch 确保原子性操作：同时写入新书和删除旧书
         val batch = db.batch()
         batch.set(getBooksRef().document(finalNewTitle), newBook)
         batch.delete(oldBookRef)
@@ -90,12 +94,14 @@ class BookRepository {
 
     /** Saves reading progress (page number) using merge to preserve other fields */
     suspend fun saveProgress(rawTitle: String, page: Int) {
+        if (auth.currentUser == null) return
         val title = sanitizeTitle(rawTitle)
         getBooksRef().document(title).set(mapOf("progress" to page), SetOptions.merge()).await()
     }
 
     /** Retrieves saved progress from cloud, defaults to 0 */
     suspend fun getProgress(rawTitle: String): Int {
+        if (auth.currentUser == null) return 0
         val title = sanitizeTitle(rawTitle)
         val doc = getBooksRef().document(title).get().await()
         return doc.getLong("progress")?.toInt() ?: 0
@@ -103,16 +109,23 @@ class BookRepository {
 
     /** Fetches full Book object by sanitized title */
     suspend fun getBookByTitle(rawTitle: String): Book? {
+        if (auth.currentUser == null) return null
         val title = sanitizeTitle(rawTitle)
         return getBooksRef().document(title).get().await().toObject(Book::class.java)
     }
 
     /**
      * Sets up real-time listener for the entire book list.
-     * Used in BookListScreen to keep UI in sync.
+     * Returns a ListenerRegistration? so it can be removed manually.
+     * Safe to call even if user is not logged in (returns null).
      */
-    fun listenToBooks(onChange: (List<Book>) -> Unit) {
-        getBooksRef().addSnapshotListener { snapshot, error ->
+    fun listenToBooks(onChange: (List<Book>) -> Unit): ListenerRegistration? {
+        if (auth.currentUser == null) {
+            onChange(emptyList())
+            return null
+        }
+
+        return getBooksRef().addSnapshotListener { snapshot, error ->
             if (error != null) return@addSnapshotListener
             val books = snapshot?.documents
                 ?.mapNotNull { it.toObject(Book::class.java) }
@@ -128,6 +141,7 @@ class BookRepository {
 
     /** Fetches all books once (used for batch operations) */
     suspend fun getAllBooks(): List<Book> {
+        if (auth.currentUser == null) return emptyList()
         return getBooksRef().get().await().documents
             .mapNotNull { it.toObject(Book::class.java) }
     }
