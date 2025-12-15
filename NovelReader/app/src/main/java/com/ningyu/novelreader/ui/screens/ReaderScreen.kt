@@ -36,10 +36,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Utility function to read the entire text content from a Content URI (SAF-based file access).
- * @param context The application context for content resolution.
- * @param uriString The string representation of the persistent Content URI.
- * @return The full text content of the file, or an error message if reading fails.
+ * Reads a local text file (via Content URI) and displays it with precise pagination using TextMeasurer.
+ * Supports font size, line height, night mode, and cloud + local progress sync.
+ * Pagination is done incrementally: initial 20 pages for quick loading, rest in background.
  */
 private fun readTextFromUri(context: Context, uriString: String): String = try {
     val uri = uriString.toUri()
@@ -49,7 +48,7 @@ private fun readTextFromUri(context: Context, uriString: String): String = try {
     "Failed to read file: ${e.message}"
 }
 
-@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter", "LocalContextResourcesRead")
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
@@ -57,6 +56,7 @@ fun ReaderScreen(
     repository: BookRepository,
     onBack: () -> Unit
 ) {
+    // Coroutine scope for launching async tasks like saving progress or background pagination
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val density = LocalDensity.current
@@ -74,15 +74,15 @@ fun ReaderScreen(
     var currentGlobalIndex by remember { mutableIntStateOf(0) }
     var isFirstLoad by remember { mutableStateOf(true) }
 
-    // Reading settings variables that trigger recomposition and repagination.
+    // Reading settings states
     val fontSizeSp = settings.fontSizeSp
     val lineHeightMultiplier = settings.lineHeightMultiplier
     val isNightMode = settings.isNightMode
 
+    // Dialog visibility for reading settings
     var showSettingsDialog by remember { mutableStateOf(false) }
     var topBarVisible by remember { mutableStateOf(true) }
 
-    // Calculate the text style based on current settings.
     val textStyle = TextStyle(
         fontSize = fontSizeSp.sp,
         lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
@@ -91,20 +91,16 @@ fun ReaderScreen(
     val textColor = if (isNightMode) Color(0xFFE0E0E0) else Color.Black
     val backgroundColor = if (isNightMode) Color(0xFF0D1117) else Color.White
 
-    // Padding values for the text content area.
     val horizontalPaddingDp = 20.dp
     val verticalPaddingDp = 16.dp
 
     val pagerState = rememberPagerState(pageCount = { pages.size })
 
-    // Retrieve the locally saved reading progress for the current book.
     val initialLocalPage = remember(title) {
         context.getSharedPreferences("progress", Context.MODE_PRIVATE).getInt(title, 0)
     }
 
-    /**
-     * Function to save the current page progress locally (SharedPreferences) and remotely (Firestore).
-     */
+    // Function to save progress locally and to cloud
     val saveProgress: () -> Unit = {
         val page = pagerState.currentPage
         context.getSharedPreferences("progress", Context.MODE_PRIVATE).edit {
@@ -114,15 +110,13 @@ fun ReaderScreen(
         scope.launch(Dispatchers.IO) { repository.saveProgress(title, page) }
     }
 
-    /**
-     * Effect to handle book loading and text pagination.
-     * Reruns when title or text style settings change.
-     */
+    // Effect to load and paginate the book when title or settings change
     LaunchedEffect(title, fontSizeSp, lineHeightMultiplier) {
         isLoading = true
         errorMessage = null
         isFullPaginationComplete = false
 
+        // Calculate available content dimensions
         val screenWidthPx = context.resources.displayMetrics.widthPixels
         val screenHeightPx = context.resources.displayMetrics.heightPixels
 
@@ -131,6 +125,7 @@ fun ReaderScreen(
 
         val constraints = Constraints(maxWidth = contentWidth, maxHeight = contentHeight)
 
+        // Perform pagination on Default dispatcher (CPU-intensive)
         withContext(Dispatchers.Default) {
             val book = repository.getBookByTitle(title) ?: run {
                 errorMessage = "Book not found"
@@ -138,9 +133,8 @@ fun ReaderScreen(
             }
 
             var fullText = readTextFromUri(context, book.localPath)
-                .replace("\uFEFF", "") // BOM (Byte Order Mark)
-                .replace("\u200B", "") // Zero Width Space
-
+                .replace("\uFEFF", "")
+                .replace("\u200B", "")
 
             if (fullText.length < 5) {
                 errorMessage = "File is empty or corrupted"
@@ -151,11 +145,7 @@ fun ReaderScreen(
             val offsetsList = mutableListOf<Int>()
             var currentOffset = 0
 
-            /**
-             * Core pagination function. Uses TextMeasurer to find the character offset
-             * where the text overflows the screen constraints.
-             * It paginates a limited amount (pageLimit) quickly for the initial display.
-             */
+            // Helper function to paginate a portion of text
             fun paginate(text: String, pageLimit: Int = Int.MAX_VALUE): String {
                 var remaining = text
                 var pagesAdded = 0
@@ -163,7 +153,6 @@ fun ReaderScreen(
                 while (remaining.isNotEmpty() && pagesAdded < pageLimit) {
                     offsetsList.add(currentOffset)
 
-                    // Measure in chunks to avoid measuring the entire text at once (performance).
                     val measureChunkSize = 3000
                     val chunkToMeasure = if (remaining.length > measureChunkSize) {
                         remaining.substring(0, measureChunkSize)
@@ -171,6 +160,7 @@ fun ReaderScreen(
                         remaining
                     }
 
+                    // Measure text layout
                     val result = textMeasurer.measure(
                         text = AnnotatedString(chunkToMeasure),
                         style = textStyle,
@@ -207,7 +197,7 @@ fun ReaderScreen(
             }
 
             var remainingText = fullText
-            remainingText = paginate(remainingText, 200)
+            remainingText = paginate(remainingText, 20)
 
             pages = pagesList
             pageOffsets = offsetsList
@@ -216,7 +206,7 @@ fun ReaderScreen(
             val targetPage = if (isFirstLoad) {
                 val p = initialLocalPage.coerceIn(0, pagesList.lastIndex)
                 if (offsetsList.isNotEmpty() && p < offsetsList.size) {
-                    currentGlobalIndex = offsetsList[p] // Record the global index.
+                    currentGlobalIndex = offsetsList[p]
                 }
                 p
             } else {
@@ -231,6 +221,7 @@ fun ReaderScreen(
                 if (foundPage > 0 && offsetsList[foundPage] > currentGlobalIndex) foundPage - 1 else foundPage
             }
 
+            // Scroll to target page on main thread
             withContext(Dispatchers.Main) {
                 if (pagesList.isNotEmpty()) {
                     pagerState.scrollToPage(targetPage)
@@ -238,11 +229,11 @@ fun ReaderScreen(
                 isFirstLoad = false
             }
 
-            // Start background pagination for the rest of the book content.
             if (remainingText.isNotEmpty()) {
                 scope.launch(Dispatchers.Default) {
                     val bgPages = pagesList.toMutableList()
                     val bgOffsets = offsetsList.toMutableList()
+
                     var bgRemaining = remainingText
                     var bgCurrentOffset = currentOffset
 
@@ -295,20 +286,20 @@ fun ReaderScreen(
         }
     }
 
-    // Effect to update the global index and save progress when the page changes.
+    // Update global index when page changes, save progress if not scrolling
     LaunchedEffect(pagerState.currentPage) {
         if (!isLoading && pages.isNotEmpty() && pagerState.currentPage < pageOffsets.size) {
             currentGlobalIndex = pageOffsets[pagerState.currentPage]
-            if (!pagerState.isScrollInProgress) saveProgress() // Save progress only if not scrolling.
+            if (!pagerState.isScrollInProgress) saveProgress()
         }
     }
 
-    // Effect to save progress immediately after scrolling stops.
+    // Save progress when scrolling stops
     LaunchedEffect(pagerState.isScrollInProgress) {
         if (!pagerState.isScrollInProgress) saveProgress()
     }
 
-    // Effect to sync progress from the cloud on initial load, overriding local state if cloud is further.
+    // Sync with cloud progress on initial load if higher
     LaunchedEffect(Unit) {
         if (pages.isNotEmpty()) {
             val cloudPage = withContext(Dispatchers.IO) { repository.getProgress(title) }
@@ -321,15 +312,13 @@ fun ReaderScreen(
         }
     }
 
-    // Effect to auto-hide the top bar after a delay.
     LaunchedEffect(topBarVisible) {
         if (topBarVisible) {
-            delay(3000) // Wait 3 seconds.
+            delay(3000)
             topBarVisible = false
         }
     }
 
-    // Custom back handler to save progress before navigating back.
     BackHandler { saveProgress(); onBack() }
 
     Box(
@@ -362,7 +351,6 @@ fun ReaderScreen(
                             }
                         },
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            // Customize top bar colors based on night mode.
                             containerColor = if (isNightMode) Color(0xFF1E1E1E)
                             else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
                         )
@@ -398,7 +386,7 @@ fun ReaderScreen(
             }
         }
 
-        // Reading Settings Dialog
+        // Settings dialog for adjusting reading preferences
         if (showSettingsDialog) {
             AlertDialog(
                 onDismissRequest = {
@@ -408,7 +396,6 @@ fun ReaderScreen(
                 title = { Text("Reading Settings") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                        // Font Size Slider
                         Column {
                             Text("Font Size: ${settings.fontSizeSp.toInt()} sp")
                             Slider(
@@ -418,7 +405,6 @@ fun ReaderScreen(
                                 steps = 18
                             )
                         }
-                        // Line Spacing Slider
                         Column {
                             Text("Line Spacing: ${"%.1f".format(settings.lineHeightMultiplier)}")
                             Slider(
@@ -428,7 +414,6 @@ fun ReaderScreen(
                                 steps = 15
                             )
                         }
-                        // Night Mode Switch
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
