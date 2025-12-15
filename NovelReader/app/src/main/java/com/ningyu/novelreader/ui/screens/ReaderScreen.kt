@@ -19,7 +19,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
@@ -31,8 +36,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Reads a local text file (via Content URI) and displays it with custom pagination.
- * Supports font size, line height, night mode, and cloud + local progress sync.
+ * Utility function to read the entire text content from a Content URI (SAF-based file access).
+ * @param context The application context for content resolution.
+ * @param uriString The string representation of the persistent Content URI.
+ * @return The full text content of the file, or an error message if reading fails.
  */
 private fun readTextFromUri(context: Context, uriString: String): String = try {
     val uri = uriString.toUri()
@@ -42,7 +49,7 @@ private fun readTextFromUri(context: Context, uriString: String): String = try {
     "Failed to read file: ${e.message}"
 }
 
-@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter", "LocalContextResourcesRead")
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReaderScreen(
@@ -55,11 +62,19 @@ fun ReaderScreen(
     val density = LocalDensity.current
     val settings = rememberReadingSettings()
 
+    val textMeasurer = rememberTextMeasurer()
+
     var pages by remember { mutableStateOf(emptyList<String>()) }
+    var pageOffsets by remember { mutableStateOf(emptyList<Int>()) }
+
     var isLoading by remember { mutableStateOf(true) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isFullPaginationComplete by remember { mutableStateOf(false) }
 
+    var currentGlobalIndex by remember { mutableIntStateOf(0) }
+    var isFirstLoad by remember { mutableStateOf(true) }
+
+    // Reading settings variables that trigger recomposition and repagination.
     val fontSizeSp = settings.fontSizeSp
     val lineHeightMultiplier = settings.lineHeightMultiplier
     val isNightMode = settings.isNightMode
@@ -67,18 +82,29 @@ fun ReaderScreen(
     var showSettingsDialog by remember { mutableStateOf(false) }
     var topBarVisible by remember { mutableStateOf(true) }
 
-    val textStyle = TextStyle(fontSize = fontSizeSp.sp, lineHeight = (fontSizeSp * lineHeightMultiplier).sp)
+    // Calculate the text style based on current settings.
+    val textStyle = TextStyle(
+        fontSize = fontSizeSp.sp,
+        lineHeight = (fontSizeSp * lineHeightMultiplier).sp,
+        fontWeight = FontWeight.Normal
+    )
     val textColor = if (isNightMode) Color(0xFFE0E0E0) else Color.Black
     val backgroundColor = if (isNightMode) Color(0xFF0D1117) else Color.White
 
+    // Padding values for the text content area.
+    val horizontalPaddingDp = 20.dp
+    val verticalPaddingDp = 16.dp
+
     val pagerState = rememberPagerState(pageCount = { pages.size })
 
-    // Local progress (fallback when no internet)
-    val localProgress = remember(title) {
+    // Retrieve the locally saved reading progress for the current book.
+    val initialLocalPage = remember(title) {
         context.getSharedPreferences("progress", Context.MODE_PRIVATE).getInt(title, 0)
     }
 
-    // Save progress both locally and to cloud
+    /**
+     * Function to save the current page progress locally (SharedPreferences) and remotely (Firestore).
+     */
     val saveProgress: () -> Unit = {
         val page = pagerState.currentPage
         context.getSharedPreferences("progress", Context.MODE_PRIVATE).edit {
@@ -88,82 +114,179 @@ fun ReaderScreen(
         scope.launch(Dispatchers.IO) { repository.saveProgress(title, page) }
     }
 
-    // Load and paginate book content
+    /**
+     * Effect to handle book loading and text pagination.
+     * Reruns when title or text style settings change.
+     */
     LaunchedEffect(title, fontSizeSp, lineHeightMultiplier) {
         isLoading = true
         errorMessage = null
         isFullPaginationComplete = false
 
-        val lineHeightPx = with(density) { (fontSizeSp * lineHeightMultiplier).sp.toPx() }
+        val screenWidthPx = context.resources.displayMetrics.widthPixels
         val screenHeightPx = context.resources.displayMetrics.heightPixels
-        val verticalPaddingPx = with(density) { 32.dp.toPx() }
-        val availableHeightPx = screenHeightPx - verticalPaddingPx
-        val maxLinesPerPage = (availableHeightPx / lineHeightPx).toInt().coerceAtLeast(20)
 
-        val charsPerLine = (38 * (19f / fontSizeSp)).toInt().coerceAtLeast(20)
-        var charsPerPage = maxLinesPerPage * charsPerLine - 10
+        val contentWidth = with(density) { screenWidthPx - (horizontalPaddingDp.toPx() * 2) }.toInt()
+        val contentHeight = with(density) { screenHeightPx - (verticalPaddingDp.toPx() * 2) }.toInt()
 
-        withContext(Dispatchers.IO) {
+        val constraints = Constraints(maxWidth = contentWidth, maxHeight = contentHeight)
+
+        withContext(Dispatchers.Default) {
             val book = repository.getBookByTitle(title) ?: run {
                 errorMessage = "Book not found"
                 return@withContext
             }
 
             var fullText = readTextFromUri(context, book.localPath)
-                .replace("\uFEFF", "")
-                .replace("\u200B", "")
-                .replace(Regex("[\\p{Cntrl}&&[^\r\n\t]]"), "")
+                .replace("\uFEFF", "") // BOM (Byte Order Mark)
+                .replace("\u200B", "") // Zero Width Space
 
-            if (fullText.length < 10) {
+
+            if (fullText.length < 5) {
                 errorMessage = "File is empty or corrupted"
                 return@withContext
             }
 
             val pagesList = mutableListOf<String>()
-            var remainingText = fullText
+            val offsetsList = mutableListOf<Int>()
+            var currentOffset = 0
 
-            while (remainingText.isNotEmpty() && pagesList.size < 50) {
-                if (remainingText.length <= charsPerPage) {
-                    pagesList.add(remainingText.trim())
-                    break
-                }
+            /**
+             * Core pagination function. Uses TextMeasurer to find the character offset
+             * where the text overflows the screen constraints.
+             * It paginates a limited amount (pageLimit) quickly for the initial display.
+             */
+            fun paginate(text: String, pageLimit: Int = Int.MAX_VALUE): String {
+                var remaining = text
+                var pagesAdded = 0
 
-                var cutPos = charsPerPage.coerceAtMost(remainingText.length)
-                for (i in cutPos downTo (cutPos - 200).coerceAtLeast(0)) {
-                    if (remainingText[i] in "\n ") {
-                        cutPos = i + 1
-                        break
+                while (remaining.isNotEmpty() && pagesAdded < pageLimit) {
+                    offsetsList.add(currentOffset)
+
+                    // Measure in chunks to avoid measuring the entire text at once (performance).
+                    val measureChunkSize = 3000
+                    val chunkToMeasure = if (remaining.length > measureChunkSize) {
+                        remaining.substring(0, measureChunkSize)
+                    } else {
+                        remaining
                     }
-                }
 
-                pagesList.add(remainingText.substring(0, cutPos).trim())
-                remainingText = remainingText.substring(cutPos).trimStart()
+                    val result = textMeasurer.measure(
+                        text = AnnotatedString(chunkToMeasure),
+                        style = textStyle,
+                        constraints = constraints
+                    )
+
+                    if (result.hasVisualOverflow) {
+                        val lastVisibleLineIndex = (0 until result.lineCount).lastOrNull {
+                            result.getLineBottom(it) <= contentHeight
+                        } ?: 0
+
+                        val endOffset = result.getLineEnd(lastVisibleLineIndex, visibleEnd = true)
+
+                        val pageText = chunkToMeasure.substring(0, endOffset)
+
+                        pagesList.add(pageText)
+                        currentOffset += pageText.length
+
+                        remaining = remaining.substring(endOffset)
+                    } else {
+                        if (chunkToMeasure.length == remaining.length) {
+                            pagesList.add(remaining)
+                            currentOffset += remaining.length
+                            remaining = ""
+                        } else {
+                            pagesList.add(chunkToMeasure)
+                            currentOffset += chunkToMeasure.length
+                            remaining = remaining.substring(chunkToMeasure.length)
+                        }
+                    }
+                    pagesAdded++
+                }
+                return remaining
             }
 
+            var remainingText = fullText
+            remainingText = paginate(remainingText, 200)
+
             pages = pagesList
+            pageOffsets = offsetsList
             isLoading = false
 
-            // Continue pagination in background if needed
+            val targetPage = if (isFirstLoad) {
+                val p = initialLocalPage.coerceIn(0, pagesList.lastIndex)
+                if (offsetsList.isNotEmpty() && p < offsetsList.size) {
+                    currentGlobalIndex = offsetsList[p] // Record the global index.
+                }
+                p
+            } else {
+                var foundPage = 0
+                for (i in offsetsList.indices) {
+                    if (offsetsList[i] > currentGlobalIndex) {
+                        break
+                    }
+                    foundPage = i
+                }
+
+                if (foundPage > 0 && offsetsList[foundPage] > currentGlobalIndex) foundPage - 1 else foundPage
+            }
+
+            withContext(Dispatchers.Main) {
+                if (pagesList.isNotEmpty()) {
+                    pagerState.scrollToPage(targetPage)
+                }
+                isFirstLoad = false
+            }
+
+            // Start background pagination for the rest of the book content.
             if (remainingText.isNotEmpty()) {
-                scope.launch(Dispatchers.IO) {
-                    val backgroundList = pagesList.toMutableList()
-                    var text = remainingText
-                    while (text.isNotEmpty()) {
-                        if (text.length <= charsPerPage) {
-                            backgroundList.add(text.trim())
-                            break
+                scope.launch(Dispatchers.Default) {
+                    val bgPages = pagesList.toMutableList()
+                    val bgOffsets = offsetsList.toMutableList()
+                    var bgRemaining = remainingText
+                    var bgCurrentOffset = currentOffset
+
+                    while (bgRemaining.isNotEmpty()) {
+                        bgOffsets.add(bgCurrentOffset)
+
+                        val measureChunkSize = 3000
+                        val chunkToMeasure = if (bgRemaining.length > measureChunkSize) {
+                            bgRemaining.substring(0, measureChunkSize)
+                        } else {
+                            bgRemaining
                         }
-                        var pos = charsPerPage.coerceAtMost(text.length)
-                        for (i in pos downTo (pos - 200).coerceAtLeast(0)) {
-                            if (text[i] in "\n ") {
-                                pos = i + 1
-                                break
+
+                        val result = textMeasurer.measure(
+                            text = AnnotatedString(chunkToMeasure),
+                            style = textStyle,
+                            constraints = constraints
+                        )
+
+                        if (result.hasVisualOverflow) {
+                            val lastVisibleLineIndex = (0 until result.lineCount).lastOrNull {
+                                result.getLineBottom(it) <= contentHeight
+                            } ?: 0
+                            val endOffset = result.getLineEnd(lastVisibleLineIndex, visibleEnd = true)
+                            val pageText = chunkToMeasure.substring(0, endOffset)
+
+                            bgPages.add(pageText)
+                            bgCurrentOffset += pageText.length
+                            bgRemaining = bgRemaining.substring(endOffset)
+                        } else {
+                            if (chunkToMeasure.length == bgRemaining.length) {
+                                bgPages.add(bgRemaining)
+                                bgCurrentOffset += bgRemaining.length
+                                bgRemaining = ""
+                            } else {
+                                bgPages.add(chunkToMeasure)
+                                bgCurrentOffset += chunkToMeasure.length
+                                bgRemaining = bgRemaining.substring(chunkToMeasure.length)
                             }
                         }
-                        backgroundList.add(text.substring(0, pos).trim())
-                        text = text.substring(pos).trimStart()
                     }
-                    pages = backgroundList
+
+                    pages = bgPages
+                    pageOffsets = bgOffsets
                     isFullPaginationComplete = true
                 }
             } else {
@@ -172,38 +295,41 @@ fun ReaderScreen(
         }
     }
 
-    // Restore local progress
-    LaunchedEffect(pages) {
-        if (pages.isNotEmpty()) {
-            val target = localProgress.coerceIn(0, pages.lastIndex)
-            pagerState.scrollToPage(target)
+    // Effect to update the global index and save progress when the page changes.
+    LaunchedEffect(pagerState.currentPage) {
+        if (!isLoading && pages.isNotEmpty() && pagerState.currentPage < pageOffsets.size) {
+            currentGlobalIndex = pageOffsets[pagerState.currentPage]
+            if (!pagerState.isScrollInProgress) saveProgress() // Save progress only if not scrolling.
         }
     }
 
-    // Try to restore cloud progress (higher priority)
-    LaunchedEffect(pages) {
+    // Effect to save progress immediately after scrolling stops.
+    LaunchedEffect(pagerState.isScrollInProgress) {
+        if (!pagerState.isScrollInProgress) saveProgress()
+    }
+
+    // Effect to sync progress from the cloud on initial load, overriding local state if cloud is further.
+    LaunchedEffect(Unit) {
         if (pages.isNotEmpty()) {
             val cloudPage = withContext(Dispatchers.IO) { repository.getProgress(title) }
-                .coerceIn(0, pages.lastIndex)
-            if (cloudPage > pagerState.currentPage) {
+            if (cloudPage > pagerState.currentPage && cloudPage < pages.size) {
                 pagerState.scrollToPage(cloudPage)
+                if (cloudPage < pageOffsets.size) {
+                    currentGlobalIndex = pageOffsets[cloudPage]
+                }
             }
         }
     }
 
-    // Auto-save when page changes
-    LaunchedEffect(pagerState.currentPage, pagerState.isScrollInProgress) {
-        if (!pagerState.isScrollInProgress) saveProgress()
-    }
-
-    // Hide top bar after 3 seconds of inactivity
+    // Effect to auto-hide the top bar after a delay.
     LaunchedEffect(topBarVisible) {
         if (topBarVisible) {
-            delay(3000)
+            delay(3000) // Wait 3 seconds.
             topBarVisible = false
         }
     }
 
+    // Custom back handler to save progress before navigating back.
     BackHandler { saveProgress(); onBack() }
 
     Box(
@@ -222,7 +348,7 @@ fun ReaderScreen(
                         title = {
                             val pageInfo = if (isFullPaginationComplete) {
                                 "${pagerState.currentPage + 1}/${pages.size}"
-                            } else "${pagerState.currentPage + 1}/???"
+                            } else "${pagerState.currentPage + 1}/..."
                             Text("$title • $pageInfo")
                         },
                         navigationIcon = {
@@ -236,6 +362,7 @@ fun ReaderScreen(
                             }
                         },
                         colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            // Customize top bar colors based on night mode.
                             containerColor = if (isNightMode) Color(0xFF1E1E1E)
                             else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f)
                         )
@@ -246,11 +373,7 @@ fun ReaderScreen(
         ) { paddingValues ->
             if (isLoading) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        CircularProgressIndicator()
-                        Spacer(Modifier.height(16.dp))
-                        Text("Loading book...", color = textColor)
-                    }
+                    CircularProgressIndicator()
                 }
             } else if (errorMessage != null) {
                 Box(Modifier.fillMaxSize(), Alignment.Center) {
@@ -260,20 +383,22 @@ fun ReaderScreen(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.padding(paddingValues),
-                    beyondViewportPageCount = 3
+                    beyondViewportPageCount = 1
                 ) { pageIndex ->
-                    Text(
-                        text = pages[pageIndex],
-                        style = textStyle.copy(color = textColor),
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 20.dp, vertical = 16.dp)
-                    )
+                    if (pageIndex < pages.size) {
+                        Text(
+                            text = pages[pageIndex],
+                            style = textStyle.copy(color = textColor),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = horizontalPaddingDp, vertical = verticalPaddingDp)
+                        )
+                    }
                 }
             }
         }
 
-        // Reading settings dialog
+        // Reading Settings Dialog
         if (showSettingsDialog) {
             AlertDialog(
                 onDismissRequest = {
@@ -283,24 +408,27 @@ fun ReaderScreen(
                 title = { Text("Reading Settings") },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
+                        // Font Size Slider
                         Column {
                             Text("Font Size: ${settings.fontSizeSp.toInt()} sp")
                             Slider(
                                 value = settings.fontSizeSp,
                                 onValueChange = { settings.updateFontSize(it) },
                                 valueRange = 14f..32f,
-                                steps = 17
+                                steps = 18
                             )
                         }
+                        // Line Spacing Slider
                         Column {
-                            Text("Line Spacing: ${"%.2f".format(settings.lineHeightMultiplier)}")
+                            Text("Line Spacing: ${"%.1f".format(settings.lineHeightMultiplier)}")
                             Slider(
                                 value = settings.lineHeightMultiplier,
                                 onValueChange = { settings.updateLineHeight(it) },
-                                valueRange = 1.3f..2.6f,
-                                steps = 13
+                                valueRange = 1.0f..2.5f,
+                                steps = 15
                             )
                         }
+                        // Night Mode Switch
                         Row(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
